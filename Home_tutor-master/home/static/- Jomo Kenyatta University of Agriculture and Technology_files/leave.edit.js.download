@@ -1,0 +1,149 @@
+/*
+ * This file is part of Leave calculation.
+ *
+ */
+
+var addDays = 0;
+var submitBtn = '[data - submit - leave="submit"]';
+//Try to calculate the length of the leave
+function getLeaveLength(refreshInfos) {
+    refreshInfos = typeof refreshInfos !== 'undefined' ? refreshInfos : true;
+    var start = moment($('#Sdate').val());
+    var end = moment($('#Edate').val());
+    var startType = $('#Stime option:selected').val();
+    var endType = $('#Etime option:selected').val();
+
+    if (start.isValid() && end.isValid()) {
+        if (start.isSame(end)) {
+            if (startType === "AM" && endType === "AM") {
+                addDays = 0.5;
+                $("#spnDayOff").html("<img src='" + baseURL + "/images/leave_1d_MM.png' />");
+            }
+            if (startType == "PM" && endType == "PM") {
+                addDays = 0.5;
+                $("#spnDayOff").html("<img src='" + baseURL + "/images/leave_1d_AA.png' />");
+            }
+            if (startType == "AM" && endType == "PM") {
+                addDays = 1;
+                $("#spnDayOff").html("<img src='" + baseURL + "/images/leave_1d_MA.png' />");
+            }
+            if (startType == "PM" && endType == "AM") {
+                //Error
+                $("#spnDayOff").html("<img src='" + baseURL + "/images/date_error.png' />");
+            }
+        } else {
+            if (start.isBefore(end)) {
+                if (startType == "AM" && endType == "AM") {
+                    $("#spnDayOff").html("<img src='" + baseURL + "/images/leave_2d_MM.png' />");
+                    addDays = 0.5;
+                }
+                if (startType == "PM" && endType == "PM") {
+                    $("#spnDayOff").html("<img src='" + baseURL + "/images/leave_2d_AA.png' />");
+                    addDays = 0.5;
+                }
+                if (startType == "AM" && endType == "PM") {
+                    $("#spnDayOff").html("<img src='" + baseURL + "/images/leave_2d_MA.png' />");
+                    addDays = 1;
+                }
+                if (startType == "PM" && endType == "AM") {
+                    $("#spnDayOff").html("<img src='" + baseURL + "/images/leave_2d_AM.png' />");
+                    addDays = 0;
+                }
+            }
+        }
+        if (refreshInfos) getLeaveInfos(false);
+    }
+}
+//Get the leave credit, duration and detect overlapping cases (Ajax request)
+//Default behavour is to set the duration field. pass false if you want to disable this behaviour
+function getLeaveInfos(preventDefault) {
+    $('#frmModalAjaxWait').modal('show');
+    var start = moment($('#Sdate').val());
+    var end = moment($('#Edate').val());
+    $.ajax({
+        type: "POST",
+        url: "/LeaveApplication/validate",
+        data: {
+            id: userId,
+            type: $("#LeaveType option:selected").text(),
+            startdate: $('#Sdate').val(),
+            enddate: $('#Edate').val(),
+            startdatetype: $('#Stime').val(),
+            enddatetype: $('#Etime').val(),
+            leave_id: leaveId
+        },
+        success: function (leaveInfo) {
+            if (typeof leaveInfo.length !== 'undefined') {
+                var duration = parseFloat(leaveInfo.length) + addDays;
+                duration = Math.round(duration * 1000) / 1000; //Round to 3 decimals only if necessary
+                if (!preventDefault) {
+                    if (start.isValid() && end.isValid()) {
+                        $('#LeaveDays').val(duration);
+                    }
+                }
+            }
+            if (typeof leaveInfo.credit !== 'undefined') {
+                var credit = parseFloat(leaveInfo.credit);
+                var duration = parseFloat($("#LeaveDays").val());
+                if (duration > credit) {
+                    $('#frmModalAjaxWait').modal('hide');
+                    alert('you have exceeded your entitled leave days');
+                    $("#lblCreditAlert").show();
+                    $('#submitButton').prop('disabled', true);
+                } else {
+                    $("#lblCreditAlert").hide();
+                    $('#submitButton').prop('disabled', false);
+                }
+                if (leaveInfo.credit != "") {
+                    $("#lblCredit").text('(' + leaveInfo.credit + ')');
+                }
+            }
+            if (typeof leaveInfo.overlap !== 'undefined') {
+                if (Boolean(leaveInfo.overlap)) {
+                    $("#lblOverlappingAlert").show();
+                } else {
+                    $("#lblOverlappingAlert").hide();
+                }
+            }
+            //Check if the employee has a contract
+            if (leaveInfo.hasContract == false) {
+                alert(noContractMsg);
+            } else {
+                //If the employee has a contract, check if the current leave request is not on two yearly leave periods
+                var limit = moment(leaveInfo.endentdate);
+                if (start.isValid() && end.isValid() && limit.isValid()) {
+                    if (start.isBefore(limit) && limit.isBefore(end)) {
+                        alert(noTwoPeriodsMsg);
+                    }
+                }
+            }
+            $('#frmModalAjaxWait').modal('hide');
+
+        }
+    });
+}
+
+$(function () {
+    //On openning leave/edit, init addDays variable
+    getLeaveLength(false);
+
+    $('#Sdate').change(function () { getLeaveLength(true); });
+    $('#Edate').change(function () { getLeaveLength(); });
+    $('#Stime').change(function () { getLeaveLength(); });
+    $('#Etime').change(function () { getLeaveLength(); });
+    $('#LeaveType').change(function () { getLeaveInfos(false); });
+
+    //Check if the user has not exceed the number of entitled days
+    $("#LeaveDays").keyup(function () {
+        getLeaveInfos(true);
+    });
+   
+    $("#hrp-leave-app-form").submit(function (e) {
+        if (validate_form()) {
+            return true;
+        } else {
+            e.preventDefault();
+            return false;
+        }
+    });
+});
